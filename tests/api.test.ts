@@ -248,11 +248,146 @@ test('migration checksums detect changes to an already-applied SQL migration', a
   try {
     const original = await readFile(join(process.cwd(), 'sql', '001_init.sql'), 'utf8');
     await writeFile(join(temporary, '001_init.sql'), original + '\n-- modified after application\n');
+    const second = await readFile(join(process.cwd(), 'sql', '002_pagination_indexes.sql'), 'utf8');
+    await writeFile(join(temporary, '002_pagination_indexes.sql'), second);
     await assert.rejects(migrate(pool, temporary), /Applied migration has changed/);
     // A failed migration leaves the existing database accessible.
     const check = await pool.query('SELECT COUNT(*)::text AS count FROM schema_migrations');
-    assert.equal(check.rows[0]?.count, '1');
+    assert.equal(check.rows[0]?.count, '2');
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+});
+
+test('user status filter validates input and returns only matching rows', async () => {
+  const address = 'filter-' + randomUUID() + '@example.org';
+  const create = await app.inject({
+    method: 'POST', url: '/api/v1/users', headers: auth(),
+    payload: { email: address, displayName: 'Filter example' },
+  });
+  assert.equal(create.statusCode, 201, create.body);
+  const id = create.json().id as string;
+  try {
+    const updated = await app.inject({
+      method: 'PATCH', url: '/api/v1/users/' + id, headers: auth(),
+      payload: { status: 'suspended' },
+    });
+    assert.equal(updated.statusCode, 200, updated.body);
+
+    const filtered = await app.inject({
+      method: 'GET', url: '/api/v1/users?status=suspended&limit=10',
+      headers: auth(),
+    });
+    assert.equal(filtered.statusCode, 200, filtered.body);
+    const result = filtered.json();
+    assert.ok(result.data.some((row: { id: string }) => row.id === id));
+    assert.ok(result.data.every((row: { status: string }) => row.status === 'suspended'));
+    assert.ok(result.total >= 1);
+    assert.equal(result.limit, 10);
+    assert.equal(result.offset, 0);
+
+    const invalid = await app.inject({
+      method: 'GET', url: '/api/v1/users?status=admin', headers: auth(),
+    });
+    assert.equal(invalid.statusCode, 400);
+  } finally {
+    await app.inject({ method: 'DELETE', url: '/api/v1/users/' + id, headers: auth() });
+  }
+});
+
+test('consent history is paginated, ordered and bounded', async () => {
+  const address = 'pagination-' + randomUUID() + '@example.org';
+  const create = await app.inject({
+    method: 'POST', url: '/api/v1/users', headers: auth(),
+    payload: { email: address, displayName: 'History example' },
+  });
+  assert.equal(create.statusCode, 201, create.body);
+  const id = create.json().id as string;
+  const url = '/api/v1/users/' + id + '/consents';
+  try {
+    for (let i = 1; i <= 5; i++) {
+      const response = await app.inject({
+        method: 'POST', url, headers: auth(),
+        payload: { purpose: 'analytics', policyVersion: 'v' + i },
+      });
+      assert.equal(response.statusCode, 201, response.body);
+      if (i !== 5) {
+        const withdrawal = await app.inject({
+          method: 'DELETE', url: url + '/analytics', headers: auth(),
+        });
+        assert.equal(withdrawal.statusCode, 204);
+      }
+    }
+    const first = await app.inject({
+      method: 'GET', url: url + '?limit=2&offset=0', headers: auth(),
+    });
+    const next = await app.inject({
+      method: 'GET', url: url + '?limit=2&offset=2', headers: auth(),
+    });
+    const final = await app.inject({
+      method: 'GET', url: url + '?limit=2&offset=4', headers: auth(),
+    });
+    assert.equal(first.statusCode, 200, first.body);
+    assert.equal(next.statusCode, 200, next.body);
+    assert.equal(final.statusCode, 200, final.body);
+    const p1 = first.json(), p2 = next.json(), p3 = final.json();
+    assert.equal(p1.total, 5);
+    assert.equal(p1.limit, 2);
+    assert.equal(p1.offset, 0);
+    assert.equal(p1.data.length, 2);
+    assert.equal(p2.data.length, 2);
+    assert.equal(p3.data.length, 1);
+    assert.equal(new Set([...p1.data, ...p2.data, ...p3.data]
+      .map((row: { id: string }) => row.id)).size, 5);
+    const invalid = await app.inject({
+      method: 'GET', url: url + '?limit=101', headers: auth(),
+    });
+    assert.equal(invalid.statusCode, 400);
+    const invalidOffset = await app.inject({
+      method: 'GET', url: url + '?offset=-1', headers: auth(),
+    });
+    assert.equal(invalidOffset.statusCode, 400);
+  } finally {
+    await app.inject({ method: 'DELETE', url: '/api/v1/users/' + id, headers: auth() });
+  }
+});
+
+test('concurrent duplicate creations produce only one user and one audit event', async () => {
+  const address = 'race-' + randomUUID() + '@example.org';
+  const requests = Array.from({ length: 4 }, () =>
+    app.inject({
+      method: 'POST', url: '/api/v1/users', headers: auth(),
+      payload: { email: address, displayName: 'Race example' },
+    }),
+  );
+  const results = await Promise.all(requests);
+  assert.deepEqual(results.map((r) => r.statusCode).sort(), [201, 409, 409, 409]);
+  const created = results.find((r) => r.statusCode === 201);
+  assert.ok(created);
+  const id = created.json().id as string;
+  try {
+    const records = await pool.query<{ count: string }>(
+      'SELECT COUNT(*)::text AS count FROM users WHERE email = $1',
+      [address],
+    );
+    assert.equal(records.rows[0]?.count, '1');
+    const audit = await pool.query<{ count: string }>(
+      "SELECT COUNT(*)::text AS count FROM audit_events WHERE user_id = $1 AND event_type = 'user.created'",
+      [id],
+    );
+    assert.equal(audit.rows[0]?.count, '1');
+  } finally {
+    await app.inject({ method: 'DELETE', url: '/api/v1/users/' + id, headers: auth() });
+  }
+});
+
+test('database validates the timestamp chronology from migration 002', async () => {
+  await assert.rejects(
+    pool.query(
+      "INSERT INTO users (email, display_name, created_at, updated_at) " +
+      "VALUES ($1, $2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP - INTERVAL '1 hour')",
+      ['clock-' + randomUUID() + '@example.org', 'Chronology example'],
+    ),
+    (error: unknown) => (error as { code?: string }).code === '23514',
+  );
 });
