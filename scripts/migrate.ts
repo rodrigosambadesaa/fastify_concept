@@ -5,9 +5,7 @@ import { fileURLToPath } from 'node:url';
 import type { Pool } from 'pg';
 import { createPool } from '../src/db.js';
 
-const defaultMigrationDirectory = resolve(
-  fileURLToPath(new URL('../sql/', import.meta.url)),
-);
+const defaultMigrationDirectory = resolve(process.cwd(), 'sql');
 
 export async function migrate(pool: Pool, directory = defaultMigrationDirectory): Promise<void> {
   const files = (await readdir(directory))
