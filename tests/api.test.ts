@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { after, before, test } from 'node:test';
 import type { FastifyInstance } from 'fastify';
 import type { Pool } from 'pg';
@@ -212,4 +215,44 @@ test('hard deletion cascades consents and removes personal audit linkage', async
     method: 'DELETE', url: '/api/v1/users/' + userId, headers: auth(),
   });
   assert.equal(deletedAgain.statusCode, 404);
+});
+
+test('Swagger documentation is available only when explicitly enabled', async () => {
+  const docsApp = await buildApp({
+    pool, apiKey: API_KEY, logger: false, enableDocs: true,
+  });
+  try {
+    const spec = await docsApp.inject({ method: 'GET', url: '/docs/json' });
+    assert.equal(spec.statusCode, 200, spec.body);
+    const json = spec.json();
+    assert.equal(json.info.version, '2.0.0');
+    assert.ok(json.paths['/api/v1/users']);
+    assert.ok(json.components.securitySchemes.bearerAuth);
+  } finally {
+    await docsApp.close();
+  }
+});
+
+test('PostgreSQL rejects invalid data even if another client bypasses HTTP validation', async () => {
+  await assert.rejects(
+    pool.query(
+      'INSERT INTO users (email, display_name, status) VALUES ($1, $2, $3)',
+      ['invalid@example.org', 'Invalid state', 'root'],
+    ),
+    (error: unknown) => (error as { code?: string }).code === '23514',
+  );
+});
+
+test('migration checksums detect changes to an already-applied SQL migration', async () => {
+  const temporary = await mkdtemp(join(tmpdir(), 'fastify-migrations-'));
+  try {
+    const original = await readFile(join(process.cwd(), 'sql', '001_init.sql'), 'utf8');
+    await writeFile(join(temporary, '001_init.sql'), original + '\n-- modified after application\n');
+    await assert.rejects(migrate(pool, temporary), /Applied migration has changed/);
+    // A failed migration leaves the existing database accessible.
+    const check = await pool.query('SELECT COUNT(*)::text AS count FROM schema_migrations');
+    assert.equal(check.rows[0]?.count, '1');
+  } finally {
+    await rm(temporary, { recursive: true, force: true });
+  }
 });
