@@ -38,6 +38,7 @@ interface GrantConsentBody { purpose: Purpose; policyVersion: string }
 interface IdParams { id: string }
 interface PurposeParams extends IdParams { purpose: Purpose }
 interface ListQuery { limit?: number; offset?: number }
+interface UsersQuery extends ListQuery { status?: Status }
 
 export interface AppOptions {
   pool: Pool;
@@ -64,6 +65,14 @@ const pageQuery = {
   properties: {
     limit: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
     offset: { type: 'integer', minimum: 0, maximum: 100000, default: 0 },
+  },
+} as const;
+
+const usersQuery = {
+  ...pageQuery,
+  properties: {
+    ...pageQuery.properties,
+    status: { type: 'string', enum: ['active', 'suspended'] },
   },
 } as const;
 
@@ -216,31 +225,43 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     }
     const created = await withTransaction(options.pool, async (client) => {
       const result = await client.query<UserRow>(
-        'INSERT INTO users (email, display_name) VALUES ($1, $2) RETURNING ' + userColumns,
+        'INSERT INTO users (email, display_name) VALUES ($1, $2) ' +
+        'ON CONFLICT (email) DO NOTHING RETURNING ' + userColumns,
         [email, displayName],
       );
       const row = result.rows[0];
-      if (!row) throw new Error('Insert failed');
+      if (!row) return null;
       await client.query(
         "INSERT INTO audit_events (user_id, event_type) VALUES ($1, 'user.created')",
         [row.id],
       );
       return userView(row);
     });
-    return reply.code(201).header('location', '/api/v1/users/' + created.id).send(created);
+    return created
+      ? reply.code(201).header('location', '/api/v1/users/' + created.id).send(created)
+      : reply.code(409).send(errorResponse('conflict', 'Duplicate or conflicting resource'));
   });
 
-  app.get<{ Querystring: ListQuery }>('/api/v1/users', {
-    schema: { tags: ['Users'], summary: 'List users', querystring: pageQuery },
+  app.get<{ Querystring: UsersQuery }>('/api/v1/users', {
+    schema: { tags: ['Users'], summary: 'List users with optional status filter', querystring: usersQuery },
   }, async (request) => {
     const limit = request.query.limit ?? 20;
     const offset = request.query.offset ?? 0;
+    const status = request.query.status;
+    // Only fixed SQL fragments are selected; user input always travels as parameters.
+    const filter = status === undefined ? '' : ' WHERE status = $3';
+    const listValues = status === undefined ? [limit, offset] : [limit, offset, status];
+    const countFilter = status === undefined ? '' : ' WHERE status = $1';
     const [users, count] = await Promise.all([
       options.pool.query<UserRow>(
-        'SELECT ' + userColumns + ' FROM users ORDER BY created_at DESC, id LIMIT $1 OFFSET $2',
-        [limit, offset],
+        'SELECT ' + userColumns + ' FROM users' + filter +
+        ' ORDER BY created_at DESC, id LIMIT $1 OFFSET $2',
+        listValues,
       ),
-      options.pool.query<{ total: string }>('SELECT COUNT(*)::text AS total FROM users'),
+      options.pool.query<{ total: string }>(
+        'SELECT COUNT(*)::text AS total FROM users' + countFilter,
+        status === undefined ? [] : [status],
+      ),
     ]);
     return {
       data: users.rows.map(userView),
@@ -315,20 +336,37 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       : reply.code(404).send(errorResponse('not_found', 'User not found'));
   });
 
-  app.get<{ Params: IdParams }>('/api/v1/users/:id/consents', {
-    schema: { tags: ['Consents'], summary: 'List consent history', params: idParams },
+  app.get<{ Params: IdParams; Querystring: ListQuery }>('/api/v1/users/:id/consents', {
+    schema: {
+      tags: ['Consents'], summary: 'List paginated consent history',
+      params: idParams, querystring: pageQuery,
+    },
   }, async (request, reply) => {
     const found = await options.pool.query('SELECT 1 FROM users WHERE id = $1',
       [request.params.id]);
     if (found.rowCount === 0) {
       return reply.code(404).send(errorResponse('not_found', 'User not found'));
     }
-    const consents = await options.pool.query<ConsentRow>(
-      'SELECT ' + consentColumns +
-      ' FROM user_consents WHERE user_id = $1 ORDER BY granted_at DESC, id',
-      [request.params.id],
-    );
-    return { data: consents.rows.map(consentView) };
+    const limit = request.query.limit ?? 20;
+    const offset = request.query.offset ?? 0;
+    const [consents, count] = await Promise.all([
+      options.pool.query<ConsentRow>(
+        'SELECT ' + consentColumns +
+        ' FROM user_consents WHERE user_id = $1 ' +
+        'ORDER BY granted_at DESC, id DESC LIMIT $2 OFFSET $3',
+        [request.params.id, limit, offset],
+      ),
+      options.pool.query<{ total: string }>(
+        'SELECT COUNT(*)::text AS total FROM user_consents WHERE user_id = $1',
+        [request.params.id],
+      ),
+    ]);
+    return {
+      data: consents.rows.map(consentView),
+      total: Number(count.rows[0]?.total ?? 0),
+      limit,
+      offset,
+    };
   });
 
   app.post<{ Params: IdParams; Body: GrantConsentBody }>('/api/v1/users/:id/consents', {
@@ -354,19 +392,25 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
       if (found.rowCount === 0) return null;
       const result = await client.query<ConsentRow>(
         'INSERT INTO user_consents (user_id, purpose, policy_version) ' +
-        'VALUES ($1, $2, $3) RETURNING ' + consentColumns,
+        'VALUES ($1, $2, $3) ' +
+        'ON CONFLICT (user_id, purpose) WHERE withdrawn_at IS NULL ' +
+        'DO NOTHING RETURNING ' + consentColumns,
         [request.params.id, request.body.purpose, version],
       );
       const row = result.rows[0];
-      if (!row) throw new Error('Insert failed');
+      if (!row) return { kind: 'duplicate' as const };
       await client.query(
         "INSERT INTO audit_events (user_id, event_type) VALUES ($1, 'consent.granted')",
         [request.params.id],
       );
-      return consentView(row);
+      return { kind: 'created' as const, data: consentView(row) };
     });
-    return created ? reply.code(201).send(created)
-      : reply.code(404).send(errorResponse('not_found', 'User not found'));
+    if (created === null) {
+      return reply.code(404).send(errorResponse('not_found', 'User not found'));
+    }
+    return created.kind === 'duplicate'
+      ? reply.code(409).send(errorResponse('conflict', 'Duplicate or conflicting resource'))
+      : reply.code(201).send(created.data);
   });
 
   app.delete<{ Params: PurposeParams }>('/api/v1/users/:id/consents/:purpose', {

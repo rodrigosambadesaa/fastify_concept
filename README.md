@@ -94,11 +94,11 @@ solo está disponible si `ENABLE_DOCS=true` y `NODE_ENV` no es `production`. Los
 | GET | `/health/live` | Proceso activo |
 | GET | `/health/ready` | Conexión PostgreSQL comprobada |
 | POST | `/api/v1/users` | Crear usuario |
-| GET | `/api/v1/users?limit=20&offset=0` | Listar usuarios con paginación |
+| GET | `/api/v1/users?limit=20&offset=0&status=active` | Listar usuarios con paginación y filtro opcional por estado |
 | GET | `/api/v1/users/:id` | Obtener usuario |
 | PATCH | `/api/v1/users/:id` | Cambiar correo, nombre o estado |
 | DELETE | `/api/v1/users/:id` | Borrar usuario y sus consentimientos |
-| GET | `/api/v1/users/:id/consents` | Consultar histórico |
+| GET | `/api/v1/users/:id/consents?limit=20&offset=0` | Consultar histórico paginado |
 | POST | `/api/v1/users/:id/consents` | Registrar consentimiento explícito |
 | DELETE | `/api/v1/users/:id/consents/:purpose` | Retirar consentimiento |
 | GET | `/api/v1/users/:id/audit` | Consultar eventos sin contenido privado |
@@ -164,3 +164,17 @@ El código está separado en configuración, acceso a datos, migraciones,
 rutas de aplicación y pruebas. La política de calidad está en
 [GitHub Actions](.github/workflows/ci.yml); Dependabot revisa periódicamente
 las dependencias. Consulte [SECURITY.md](SECURITY.md) para reportar fallos.
+
+## Mejora de paginación y protección de integridad
+
+Los listados de usuarios e historial de consentimientos aceptan `limit` (1–100) y
+`offset` (0–100000), devuelven `data`, `total`, `limit` y `offset`, y ordenan
+siempre por fechas e identificadores para resolver empates. Los usuarios también
+pueden filtrarse por `status=active|suspended`.
+
+Los intentos de insertar correos duplicados o consentimientos ya activos se
+resuelven con `ON CONFLICT DO NOTHING`: la API devuelve HTTP 409 sin provocar
+una excepción SQL que pudiese incluir datos personales en los registros del
+servidor PostgreSQL. Se comprueba que no generen eventos de auditoría duplicados.
+La migración `002_pagination_indexes.sql` añade índices para consultas paginadas
+y una restricción cronológica sobre `users.updated_at`.
