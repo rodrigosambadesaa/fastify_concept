@@ -64,3 +64,33 @@ jobs:
         run: docker build --pull --tag fastify-concept:ci .
       - name: Verify production runtime imports without dev-only Swagger
         run: docker run --rm --entrypoint node fastify-concept:ci --input-type=module -e "await import('./dist/src/app.js'); console.log('Production runtime imports OK')"
+
+  compose-smoke:
+    name: Compose end-to-end persistence and security smoke test
+    runs-on: ubuntu-24.04
+    needs: container-build
+    env:
+      POSTGRES_USER: fastify
+      POSTGRES_PASSWORD: ci-only-url-safe-db-password-123456789
+      API_KEY: ci-only-secret-key-12345678901234567890
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Use Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Validate Compose
+        run: docker compose config --quiet
+      - name: Start persistent PostgreSQL + API
+        run: docker compose up -d --build --wait --wait-timeout 180
+      - name: Exercise real HTTP and verify data survives API restart
+        run: node tests/compose-smoke.mjs
+      - name: Collect container status on failure
+        if: failure()
+        run: docker compose ps && docker compose logs --no-color --tail=80
+      - name: Tear down integration environment without changing real databases
+        if: always()
+        run: docker compose down --volumes --remove-orphans
