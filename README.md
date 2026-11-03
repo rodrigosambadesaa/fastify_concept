@@ -85,7 +85,7 @@ no equivale a un sistema de autenticación multiusuario ni a un servidor de iden
 Sustituirlo por OAuth2/OIDC y permisos por usuario si el uso previsto lo exige.
 
 Los endpoints de salud no revelan datos personales. `/docs` con Swagger UI
-solo está disponible si `ENABLE_DOCS=true` y `NODE_ENV` no es `production`.
+solo está disponible si `ENABLE_DOCS=true` y `NODE_ENV` no es `production`. Los paquetes de Swagger son dependencias exclusivas de desarrollo: la imagen de producción no los instala.
 
 ## Endpoints
 
@@ -134,7 +134,7 @@ de concesiones y retiradas.
 - La documentación Swagger está desactivada por defecto y en producción.
 - La configuración contiene credenciales solo mediante variables de entorno.
 - CI realiza typecheck, build, migraciones, integración con PostgreSQL real y
-  auditoría de vulnerabilidades de dependencias de producción.
+  auditoría de dependencias de producción para todas las severidades conocidas.
 
 **No es automáticamente una plataforma lista para datos personales reales.**
 Antes de un uso productivo: autenticación/autorización fina, TLS, política de

@@ -48,8 +48,8 @@ jobs:
         run: npm run db:migrate
       - name: Run real PostgreSQL integration tests
         run: npm test
-      - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
+      - name: Audit production dependencies at all severity levels
+        run: npm audit --omit=dev --audit-level=low
 
   container-build:
     name: Build production container
@@ -62,3 +62,5 @@ jobs:
           persist-credentials: false
       - name: Build image without runtime credentials
         run: docker build --pull --tag fastify-concept:ci .
+      - name: Verify production runtime imports without dev-only Swagger
+        run: docker run --rm --entrypoint node fastify-concept:ci --input-type=module -e "await import('./dist/src/app.js'); console.log('Production runtime imports OK')"
