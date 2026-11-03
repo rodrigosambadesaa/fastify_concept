@@ -25,17 +25,22 @@ Requiere Docker y Compose. La API y la base de datos quedan vinculadas
 
 ```sh
 cp .env.example .env
-# Sustituir API_KEY por una cadena aleatoria, por ejemplo:
-# openssl rand -hex 32
-# Editar .env y guardar API_KEY=... (no subir .env a Git)
-docker compose --env-file .env up --build -d
+# Generar dos valores distintos, aleatorios y seguros para una URL:
+openssl rand -hex 32   # Guardar como POSTGRES_PASSWORD=... en .env
+openssl rand -hex 32   # Guardar como API_KEY=... en .env
+# No subir .env a Git. Ambos valores son obligatorios.
+docker compose --env-file .env up --build -d --wait
 curl http://127.0.0.1:3000/health/ready
 ```
 
-En `compose.yml` la clave de DB `fastify_dev_only` sirve **únicamente para
-desarrollo local**. Cambiar `POSTGRES_PASSWORD` y `POSTGRES_USER` en `.env`
-antes de un despliegue real; para contraseñas especiales en URL, aplicar
-codificación porcentual. Para producción use un gestor de secretos, TLS y
+Docker Compose **no utiliza ninguna contraseña PostgreSQL predeterminada**:
+exige `POSTGRES_PASSWORD` no vacío en `.env`, junto con `API_KEY`.
+Genere contraseñas distintas y aleatorias con `openssl rand -hex 32` para
+evitar caracteres especiales que requieren codificación porcentual en la URL.
+En despliegues reales deben almacenarse en un gestor de secretos. Si ya existe
+un volumen PostgreSQL, **cambiar la variable no cambia automáticamente la
+contraseña del usuario dentro de la base existente**: deberá rotarla
+explícitamente sin destruir los datos. Para producción use un gestor de secretos, TLS y
 una base de datos gestionada o con backups verificados. **No exponga la API
 directamente a Internet** sin introducir controles de acceso adaptados a su
 caso y una pasarela TLS.
@@ -51,7 +56,8 @@ Se necesita Node.js >=22, npm, PostgreSQL >=14 y una base `fastify_concept`.
 ```sh
 cp .env.example .env
 npm ci
-# Exportar las variables de .env en el entorno
+# Ajustar DATABASE_URL en .env con la contraseña PostgreSQL real;
+# exportar después las variables desde el shell.
 npm run db:migrate
 npm run dev
 ```
@@ -178,3 +184,17 @@ una excepción SQL que pudiese incluir datos personales en los registros del
 servidor PostgreSQL. Se comprueba que no generen eventos de auditoría duplicados.
 La migración `002_pagination_indexes.sql` añade índices para consultas paginadas
 y una restricción cronológica sobre `users.updated_at`.
+
+## Aislamiento y prueba completa de Docker Compose
+
+La API ejecuta el proceso Node como usuario no privilegiado, con sistema de
+archivos raíz de solo lectura, sin capacidades Linux adicionales y con
+`no-new-privileges`. Sus servicios se publican exclusivamente en
+`127.0.0.1`; la base de datos mantiene sus datos en un volumen persistente.
+El contenedor de la API tiene un `healthcheck` que comprueba PostgreSQL.
+
+El trabajo `compose-smoke` de GitHub Actions construye y levanta los dos
+contenedores, comprueba autenticación y operaciones reales, reinicia el
+contenedor de la API y verifica que el usuario creado sigue presente en
+PostgreSQL. Finalmente prueba el borrado. Las credenciales de CI son
+exclusivamente ficticias y efímeras.

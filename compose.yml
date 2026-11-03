@@ -4,7 +4,7 @@ services:
     environment:
       POSTGRES_DB: fastify_concept
       POSTGRES_USER: ${POSTGRES_USER:-fastify}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fastify_dev_only}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a strong URL-safe random value in .env}
     ports:
       - "127.0.0.1:5432:5432"
     healthcheck:
@@ -17,6 +17,14 @@ services:
 
   api:
     build: .
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16777216
     depends_on:
       postgres:
         condition: service_healthy
@@ -26,9 +34,15 @@ services:
       PORT: 3000
       ENABLE_DOCS: "false"
       API_KEY: ${API_KEY:?Set a random API_KEY with at least 32 bytes in .env}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-fastify}:${POSTGRES_PASSWORD:-fastify_dev_only}@postgres:5432/fastify_concept
+      DATABASE_URL: postgresql://${POSTGRES_USER:-fastify}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a strong URL-safe random value in .env}@postgres:5432/fastify_concept
     ports:
       - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     restart: unless-stopped
 
 volumes:
