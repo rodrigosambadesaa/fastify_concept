@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: fastify_concept
+      POSTGRES_USER: ${POSTGRES_USER:-fastify}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fastify_dev_only}
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fastify} -d fastify_concept"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  api:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      ENABLE_DOCS: "false"
+      API_KEY: ${API_KEY:?Set a random API_KEY with at least 32 bytes in .env}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-fastify}:${POSTGRES_PASSWORD:-fastify_dev_only}@postgres:5432/fastify_concept
+    ports:
+      - "127.0.0.1:3000:3000"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
