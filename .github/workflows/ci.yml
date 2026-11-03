@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat/postgres-secure-api-ci]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality-and-integration:
+    name: TypeScript, PostgreSQL integration and dependency audit
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17
+        ports: ["5432:5432"]
+        env:
+          POSTGRES_DB: fastify_concept_test
+          POSTGRES_USER: fastify_test
+          POSTGRES_PASSWORD: ci_password_only
+        options: >-
+          --health-cmd "pg_isready -U fastify_test -d fastify_concept_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+    env:
+      DATABASE_URL: postgresql://fastify_test:ci_password_only@127.0.0.1:5432/fastify_concept_test
+      API_KEY: ci-only-secret-key-12345678901234567890
+      NODE_ENV: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Verify lockfile is synchronized
+        run: npm ci --no-audit --no-fund
+      - name: Check TypeScript types
+        run: npm run typecheck
+      - name: Build distributable JavaScript
+        run: npm run build
+      - name: Apply database migrations
+        run: npm run db:migrate
+      - name: Run real PostgreSQL integration tests
+        run: npm test
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
