@@ -119,6 +119,8 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({
     bodyLimit: 16 * 1024,
     trustProxy: false,
+    // Reject unexpected fields rather than silently dropping privilege-like input.
+    ajv: { customOptions: { removeAdditional: false } },
     logger: options.logger === false ? false : {
       level: options.logLevel ?? 'info',
       redact: {
