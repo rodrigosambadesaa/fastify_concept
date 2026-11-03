@@ -170,8 +170,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
     if (dbCode === '23514' || dbCode === '23502' || dbCode === '22001') {
       return reply.code(422).send(errorResponse('invalid_data', 'Database constraint violated'));
     }
-    const status = error.statusCode && error.statusCode >= 400 && error.statusCode < 500
-      ? error.statusCode : 500;
+    const possibleStatus = (error as { statusCode?: number }).statusCode;
+    const status = possibleStatus && possibleStatus >= 400 && possibleStatus < 500
+      ? possibleStatus : 500;
     if (status === 500) {
       // Avoid logging SQL values, request bodies, API keys or connection strings.
       request.log.error({ code: dbCode ?? 'unexpected', method: request.method },
