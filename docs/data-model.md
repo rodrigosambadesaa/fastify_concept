@@ -78,3 +78,12 @@ atomically under a transaction-level advisory lock. Applied migration contents
 are SHA-256 checked to detect accidental modifications. **Never edit an
 already-applied migration**: add `002_...` instead. Test migrations on a
 nonproduction database before deploying. Back up databases before changes.
+
+## Segunda migración: crecimiento y consultas
+
+`sql/002_pagination_indexes.sql` crea los índices `(status, created_at DESC, id)`
+para búsquedas por estado y `(user_id, granted_at DESC, id DESC)` para el
+historial paginado de consentimientos. Añade la restricción
+`updated_at >= created_at`. La paginación con desplazamiento se ha limitado
+para evitar consultas sin cota; si se esperan millones de filas, conviene
+migrar a paginación por cursor y estudiar los planes con `EXPLAIN ANALYZE`.
