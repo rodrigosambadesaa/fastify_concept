@@ -32,9 +32,9 @@ jobs:
       NODE_ENV: test
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Node.js 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: npm
@@ -50,3 +50,15 @@ jobs:
         run: npm test
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
+
+  container-build:
+    name: Build production container
+    runs-on: ubuntu-24.04
+    needs: quality-and-integration
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Build image without runtime credentials
+        run: docker build --pull --tag fastify-concept:ci .

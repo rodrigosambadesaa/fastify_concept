@@ -67,7 +67,7 @@ orphaned or concurrently duplicated active consents.
 **Privacy:** consent is optional and purpose-specific (marketing/analytics).
 It is never assumed merely from account creation. Withdrawal keeps a history
 row but marks it inactive. Deleting a user cascades to their consent history;
-audit entries contain only an event type and time, and lose their user link.
+audit entries retain an event type and time and lose their user link after deletion; before deletion, the pseudonymous user_id remains personal data under data-protection law.
 A real deployment still needs a legal basis, retention policy, privacy notice,
 backup erasure/retention procedures, and access controls.
 

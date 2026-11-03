@@ -4,8 +4,7 @@
 
 Modernización del proyecto de ejemplo Fastify. API REST en **TypeScript + Fastify 5**
 con **PostgreSQL 17**, migraciones SQL transaccionales, persistencia real,
-autenticación administrativa, historial de consentimientos, auditoría sin datos
-identificativos, validación JSON Schema, Swagger opcional, pruebas de integración
+autenticación administrativa, historial de consentimientos, auditoría sin guardar correos ni cuerpos de solicitudes, validación JSON Schema, Swagger opcional, pruebas de integración
 y GitHub Actions.
 
 ## Modelo de datos
@@ -15,7 +14,7 @@ tipos, normalización y restricciones](docs/data-model.md), además de
 [la migración SQL inicial](sql/001_init.sql).
 
 Tablas: `users` (identidad y estado), `user_consents` (histórico voluntario
-por finalidad y versión), `audit_events` (traza sin contenido de solicitudes) y
+por finalidad y versión), `audit_events` (traza de operaciones sin almacenar solicitudes ni correos) y
 `schema_migrations` (versionado y sumas SHA-256). Los datos no se guardan
 en un array: sobreviven a reinicios de la API gracias al volumen PostgreSQL.
 
