@@ -2,8 +2,6 @@ import { timingSafeEqual } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
-import swagger from '@fastify/swagger';
-import swaggerUi from '@fastify/swagger-ui';
 import type { Pool } from 'pg';
 import { withTransaction } from './db.js';
 
@@ -140,6 +138,9 @@ export async function buildApp(options: AppOptions): Promise<FastifyInstance> {
   });
 
   if (options.enableDocs) {
+    // Documentation is a development-only dependency, never loaded in production.
+    const { default: swagger } = await import('@fastify/swagger');
+    const { default: swaggerUi } = await import('@fastify/swagger-ui');
     await app.register(swagger, {
       openapi: {
         info: { title: 'Fastify Concept API', version: '2.0.0',

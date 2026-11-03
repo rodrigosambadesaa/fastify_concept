@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Secure Fastify REST API backed by PostgreSQL, with migrations and integration tests",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "build": "tsc -p tsconfig.json",
@@ -18,8 +20,6 @@
   "dependencies": {
     "@fastify/helmet": "^13.0.2",
     "@fastify/rate-limit": "^10.3.0",
-    "@fastify/swagger": "^9.5.2",
-    "@fastify/swagger-ui": "^6.1.2",
     "fastify": "^5.12.8",
     "pg": "^8.16.3"
   },
@@ -27,6 +27,8 @@
     "@types/node": "^24.0.0",
     "@types/pg": "^8.15.0",
     "tsx": "^4.20.0",
-    "typescript": "^5.9.0"
+    "typescript": "^5.9.0",
+    "@fastify/swagger": "^9.5.2",
+    "@fastify/swagger-ui": "^6.1.2"
   }
 }
